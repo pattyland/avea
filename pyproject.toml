@@ -1,30 +1,30 @@
 [build-system]
-requires = ["setuptools>=64", "wheel"]
 build-backend = "setuptools.build_meta"
+requires = ["setuptools>=64", "wheel"]
 
 [project]
-name = "avea"
-version = "1.6.1"
-description = "Control an Elgato Avea bulb using python3"
-readme = "README.md"
-requires-python = ">=3.10,<4"
-license = {text = "MIT"}
 authors = [
     {name = "k0rventen"},
     {name = "pattyland"},
 ]
 classifiers = [
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: POSIX :: Linux",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
-    "License :: OSI Approved :: MIT License",
-    "Operating System :: POSIX :: Linux",
 ]
 dependencies = [
     "bleak>=1.0.0",
     "bleak-retry-connector>=4.0.0",
 ]
+description = "Control an Elgato Avea bulb using python3"
+license = { text = "MIT" }
+name = "avea"
+readme = "README.md"
+requires-python = ">=3.10,<4"
+version = "1.6.1"
 
 [project.urls]
 Documentation = "https://github.com/k0rventen/avea/blob/main/README.md"
@@ -34,3 +34,4 @@ Tracker = "https://github.com/k0rventen/avea/issues"
 
 [tool.setuptools.packages.find]
 include = ["avea"]
+
