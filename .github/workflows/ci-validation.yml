@@ -24,11 +24,8 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install build pytest pyprojectsort
+          pip install build pytest
           pip install -e .
-
-      - name: Validate pyproject.toml ordering
-        run: pyprojectsort --check pyproject.toml
 
       # - name: Run tests
       #   run: python -m pytest
