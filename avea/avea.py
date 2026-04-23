@@ -9,7 +9,6 @@ import asyncio
 import logging
 import math
 import threading
-from contextlib import suppress
 from typing import Awaitable, Callable, Optional, Sequence
 
 from bleak import BleakClient, BleakScanner
@@ -101,14 +100,23 @@ class Bulb:
         with self._op_lock:
             if self._loop is None:
                 return
-            with suppress(BleakError, RuntimeError, AttributeError):
-                if self._client:
+            if self._client:
+                try:
                     self._submit(self._disconnect())
+                except (BleakError, RuntimeError, AttributeError) as exc:
+                    _LOGGER.debug(
+                        "Ignoring disconnect error during close for bulb %s: %s",
+                        self.addr,
+                        exc,
+                    )
             self._shutdown_loop()
 
     def __del__(self):
-        with suppress(BleakError, RuntimeError, AttributeError):
+        try:
             self.close()
+        except (BleakError, RuntimeError, AttributeError):
+            # Destructors must not raise.
+            pass
 
     # ------------------------------------------------------------------
     # Connection handling
@@ -156,9 +164,15 @@ class Bulb:
             )
         except (BleakError, asyncio.TimeoutError, AttributeError, OSError) as exc:
             _LOGGER.warning("Could not connect to the Bulb %s: %s", self.addr, exc)
-            with suppress(BleakError, AttributeError, RuntimeError):
-                if client:
+            if client:
+                try:
                     await client.disconnect()
+                except (BleakError, AttributeError, RuntimeError) as disconnect_exc:
+                    _LOGGER.debug(
+                        "Cleanup disconnect failed after connect error for bulb %s: %s",
+                        self.addr,
+                        disconnect_exc,
+                    )
             return False
 
         self._client = client
@@ -169,10 +183,22 @@ class Bulb:
         self._client = None
         if not client:
             return
-        with suppress(BleakError, AttributeError):
+        try:
             await client.stop_notify(CONTROL_CHARACTERISTIC_UUID)
-        with suppress(BleakError, AttributeError):
+        except (BleakError, AttributeError) as exc:
+            _LOGGER.debug(
+                "Ignoring stop_notify error during disconnect for bulb %s: %s",
+                self.addr,
+                exc,
+            )
+        try:
             await client.disconnect()
+        except (BleakError, AttributeError) as exc:
+            _LOGGER.debug(
+                "Ignoring disconnect error for bulb %s: %s",
+                self.addr,
+                exc,
+            )
 
     def subscribe_to_notification(self):
         """Notifications are handled directly by bleak during connect."""
@@ -545,7 +571,7 @@ def _run_async(factory: Callable[[], Awaitable]):
             asyncio.set_event_loop(loop)
             try:
                 result["value"] = loop.run_until_complete(factory())
-            except (RuntimeError, ValueError, BleakError) as exc:
+            except BaseException as exc:
                 error["exc"] = exc
             finally:
                 loop.close()
