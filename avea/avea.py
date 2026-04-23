@@ -2,7 +2,6 @@
 Creator : k0rventen
 License : MIT
 Source  : https://github.com/k0rventen/avea
-Version : 1.5.2
 """
 
 import asyncio
