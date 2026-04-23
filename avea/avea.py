@@ -209,7 +209,7 @@ class Bulb:
         expected_cmd: Optional[int],
         delay: float = 0.0,
         timeout: float = 1.0,
-    ) -> None:
+    ) -> bool:
         if not self._client or not self._client.is_connected:
             raise BleakError("Client is not connected")
         if delay:
@@ -220,6 +220,7 @@ class Bulb:
         try:
             await self._client.write_gatt_char(CONTROL_CHARACTERISTIC_UUID, command, response=False)
             await asyncio.wait_for(event.wait(), timeout)
+            return True
         except asyncio.TimeoutError:
             _LOGGER.debug(
                 "Timeout waiting for notification from %s (cmd=%s, timeout=%.2fs)",
@@ -227,6 +228,7 @@ class Bulb:
                 command.hex(),
                 timeout,
             )
+            return False
         finally:
             self._notification_event = None
             self._expected_cmd = None
@@ -330,9 +332,14 @@ class Bulb:
                     self.addr,
                 )
                 return self.brightness
-            self._submit(
+            got_notification = self._submit(
                 self._request_notification(b"\x57", expected_cmd=0x57, delay=0.5)
             )
+            if not got_notification:
+                _LOGGER.debug(
+                    "Returning cached brightness for %s: no notification received",
+                    self.addr,
+                )
             if not already_connected:
                 self.disconnect()
             return self.brightness
@@ -415,9 +422,13 @@ class Bulb:
                     "Returning cached color for %s: connection unavailable", self.addr
                 )
                 return self.white, self.red, self.green, self.blue
-            self._submit(
+            got_notification = self._submit(
                 self._request_notification(b"\x35", expected_cmd=0x35, delay=0.5)
             )
+            if not got_notification:
+                _LOGGER.debug(
+                    "Returning cached color for %s: no notification received", self.addr
+                )
             if not already_connected:
                 self.disconnect()
             self._color_known = True
@@ -431,9 +442,13 @@ class Bulb:
                     "Returning cached RGB for %s: connection unavailable", self.addr
                 )
                 return int(self.red / 16), int(self.green / 16), int(self.blue / 16)
-            self._submit(
+            got_notification = self._submit(
                 self._request_notification(b"\x35", expected_cmd=0x35, delay=0.5)
             )
+            if not got_notification:
+                _LOGGER.debug(
+                    "Returning cached RGB for %s: no notification received", self.addr
+                )
             if not already_connected:
                 self.disconnect()
             self._color_known = True
@@ -447,9 +462,13 @@ class Bulb:
                     "Returning cached name for %s: connection unavailable", self.addr
                 )
                 return self.name
-            self._submit(
+            got_notification = self._submit(
                 self._request_notification(b"\x58", expected_cmd=0x58, delay=0.5)
             )
+            if not got_notification:
+                _LOGGER.debug(
+                    "Returning cached name for %s: no notification received", self.addr
+                )
             if not already_connected:
                 self.disconnect()
             return self.name
@@ -563,6 +582,8 @@ def _run_async(factory: Callable[[], Awaitable]):
         thread.join()
         if "exc" in error:
             raise error["exc"]
+        if "value" not in result:
+            raise RuntimeError("Failed to execute async factory in helper thread")
         return result.get("value")
 
 
@@ -613,7 +634,7 @@ def check_bounds(value):
     """Check if the given value is out-of-bounds (0 to 4095)."""
     try:
         ivalue = int(value)
-    except ValueError:
+    except (TypeError, ValueError):
         _LOGGER.warning(
             "Value %r was not numeric in check_bounds; using default value 0", value
         )
