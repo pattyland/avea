@@ -560,9 +560,11 @@ def _run_async(factory: Callable[[], Awaitable]):
                 result["value"] = loop.run_until_complete(factory())
             except (
                 RuntimeError,
+                TypeError,
                 ValueError,
                 BleakError,
                 asyncio.TimeoutError,
+                AttributeError,
                 OSError,
             ) as exc:
                 error["exc"] = exc
