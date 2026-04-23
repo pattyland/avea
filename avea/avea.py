@@ -377,15 +377,7 @@ class Bulb:
             init_g = self.green
             init_b = self.blue
         else:
-            try:
-                init_w, init_r, init_g, init_b = self.get_color()
-            except (BleakError, RuntimeError, ValueError) as exc:
-                _LOGGER.warning(
-                    "Could not fetch initial color for %s before transition: %s",
-                    self.addr,
-                    exc,
-                )
-                return
+            _, init_r, init_g, init_b = self.get_color()
 
         with self._op_lock:
             clamped_fps = max(1, min(int(fps), MAX_TRANSITION_FPS))
