@@ -101,13 +101,13 @@ class Bulb:
         with self._op_lock:
             if self._loop is None:
                 return
-            with suppress(Exception):
+            with suppress(BleakError, AttributeError, RuntimeError):
                 if self._client:
                     self._submit(self._disconnect())
             self._shutdown_loop()
 
     def __del__(self):
-        with suppress(Exception):
+        with suppress(BleakError, AttributeError, RuntimeError):
             self.close()
 
     # ------------------------------------------------------------------
@@ -154,9 +154,9 @@ class Bulb:
                 CONTROL_CHARACTERISTIC_UUID,
                 self._notification_handler,
             )
-        except Exception as exc:
+        except (BleakError, asyncio.TimeoutError, AttributeError, OSError, ValueError) as exc:
             _LOGGER.warning("Could not connect to the Bulb %s: %s", self.addr, exc)
-            with suppress(Exception):
+            with suppress(BleakError, AttributeError):
                 if client:
                     await client.disconnect()
             return False
@@ -169,9 +169,9 @@ class Bulb:
         self._client = None
         if not client:
             return
-        with suppress(Exception):
+        with suppress(BleakError, AttributeError):
             await client.stop_notify(CONTROL_CHARACTERISTIC_UUID)
-        with suppress(Exception):
+        with suppress(BleakError, AttributeError):
             await client.disconnect()
 
     def subscribe_to_notification(self):
@@ -209,7 +209,7 @@ class Bulb:
         expected_cmd: Optional[int],
         delay: float = 0.0,
         timeout: float = 1.0,
-    ) -> None:
+    ) -> bool:
         if not self._client or not self._client.is_connected:
             raise BleakError("Client is not connected")
         if delay:
@@ -220,8 +220,15 @@ class Bulb:
         try:
             await self._client.write_gatt_char(CONTROL_CHARACTERISTIC_UUID, command, response=False)
             await asyncio.wait_for(event.wait(), timeout)
+            return True
         except asyncio.TimeoutError:
-            pass
+            _LOGGER.debug(
+                "Timeout waiting for notification from %s (cmd=%s, timeout=%.2fs)",
+                self.addr,
+                command.hex(),
+                timeout,
+            )
+            return False
         finally:
             self._notification_event = None
             self._expected_cmd = None
@@ -232,13 +239,18 @@ class Bulb:
         try:
             payload = await self._client.read_gatt_char(FIRMWARE_REVISION_UUID)
         except (BleakError, AttributeError) as exc:
-            print(exc, "get_fw_version")
+            _LOGGER.warning(
+                "Failed reading firmware version from %s: %s", self.addr, exc
+            )
             return ""
         if isinstance(payload, bytearray):
             payload = bytes(payload)
         try:
             return payload.decode("utf-8")
-        except Exception:
+        except UnicodeDecodeError as exc:
+            _LOGGER.debug(
+                "Failed decoding firmware version for %s: %s", self.addr, exc
+            )
             return ""
 
     async def _smooth_transition(
@@ -260,9 +272,18 @@ class Bulb:
             )
             try:
                 await self._write_command(payload, with_response=False)
-            except Exception:
+            except (BleakError, AttributeError, OSError, RuntimeError) as exc:
+                _LOGGER.debug(
+                    "Write failed during smooth transition for %s; reconnecting: %s",
+                    self.addr,
+                    exc,
+                )
                 await self._disconnect()
                 if not await self._connect():
+                    _LOGGER.warning(
+                        "Aborting smooth transition for %s: reconnect failed",
+                        self.addr,
+                    )
                     break
                 await self._write_command(payload, with_response=False)
             if interval:
@@ -278,6 +299,10 @@ class Bulb:
         with self._op_lock:
             already_connected = self._is_connected()
             if not already_connected and not self.connect():
+                _LOGGER.warning(
+                    "get_fw_version failed for %s: unable to establish connection",
+                    self.addr,
+                )
                 self.fw_version = ""
                 return ""
             value = self._submit(self._read_firmware_version())
@@ -292,6 +317,10 @@ class Bulb:
             payload = compute_brightness(check_bounds(brightness))
             already_connected = self._is_connected()
             if not already_connected and not self.connect():
+                _LOGGER.warning(
+                    "set_brightness failed for %s: unable to establish connection",
+                    self.addr,
+                )
                 return
             self._submit(self._write_command(payload))
             if not already_connected:
@@ -302,10 +331,19 @@ class Bulb:
         with self._op_lock:
             already_connected = self._is_connected()
             if not already_connected and not self.connect():
+                _LOGGER.debug(
+                    "Returning cached brightness for %s: connection unavailable",
+                    self.addr,
+                )
                 return self.brightness
-            self._submit(
+            got_notification = self._submit(
                 self._request_notification(b"\x57", expected_cmd=0x57, delay=0.5)
             )
+            if not got_notification:
+                _LOGGER.debug(
+                    "Returning cached brightness for %s: no notification received",
+                    self.addr,
+                )
             if not already_connected:
                 self.disconnect()
             return self.brightness
@@ -320,6 +358,9 @@ class Bulb:
             )
             already_connected = self._is_connected()
             if not already_connected and not self.connect():
+                _LOGGER.warning(
+                    "set_color failed for %s: unable to establish connection", self.addr
+                )
                 return
             self._submit(self._write_command(payload))
             if not already_connected:
@@ -340,11 +381,7 @@ class Bulb:
             init_g = self.green
             init_b = self.blue
         else:
-            try:
-                init_w, init_r, init_g, init_b = self.get_color()
-            except Exception:
-                print("Could not connect to bulb")
-                return
+            _, init_r, init_g, init_b = self.get_color()
 
         with self._op_lock:
             clamped_fps = max(1, min(int(fps), MAX_TRANSITION_FPS))
@@ -358,6 +395,10 @@ class Bulb:
             blue_table = compute_transition_table(init_b, target_blue_12, iterations)
             already_connected = self._is_connected()
             if not already_connected and not self.connect():
+                _LOGGER.warning(
+                    "set_smooth_transition failed for %s: unable to establish connection",
+                    self.addr,
+                )
                 return
             self._submit(
                 self._smooth_transition(red_table, green_table, blue_table, interval)
@@ -373,10 +414,17 @@ class Bulb:
         with self._op_lock:
             already_connected = self._is_connected()
             if not already_connected and not self.connect():
+                _LOGGER.debug(
+                    "Returning cached color for %s: connection unavailable", self.addr
+                )
                 return self.white, self.red, self.green, self.blue
-            self._submit(
+            got_notification = self._submit(
                 self._request_notification(b"\x35", expected_cmd=0x35, delay=0.5)
             )
+            if not got_notification:
+                _LOGGER.debug(
+                    "Returning cached color for %s: no notification received", self.addr
+                )
             if not already_connected:
                 self.disconnect()
             self._color_known = True
@@ -386,10 +434,17 @@ class Bulb:
         with self._op_lock:
             already_connected = self._is_connected()
             if not already_connected and not self.connect():
+                _LOGGER.debug(
+                    "Returning cached RGB for %s: connection unavailable", self.addr
+                )
                 return int(self.red / 16), int(self.green / 16), int(self.blue / 16)
-            self._submit(
+            got_notification = self._submit(
                 self._request_notification(b"\x35", expected_cmd=0x35, delay=0.5)
             )
+            if not got_notification:
+                _LOGGER.debug(
+                    "Returning cached RGB for %s: no notification received", self.addr
+                )
             if not already_connected:
                 self.disconnect()
             self._color_known = True
@@ -399,10 +454,17 @@ class Bulb:
         with self._op_lock:
             already_connected = self._is_connected()
             if not already_connected and not self.connect():
+                _LOGGER.debug(
+                    "Returning cached name for %s: connection unavailable", self.addr
+                )
                 return self.name
-            self._submit(
+            got_notification = self._submit(
                 self._request_notification(b"\x58", expected_cmd=0x58, delay=0.5)
             )
+            if not got_notification:
+                _LOGGER.debug(
+                    "Returning cached name for %s: no notification received", self.addr
+                )
             if not already_connected:
                 self.disconnect()
             return self.name
@@ -413,6 +475,9 @@ class Bulb:
             command = b"\x58" + byte_name
             already_connected = self._is_connected()
             if not already_connected and not self.connect():
+                _LOGGER.warning(
+                    "set_name failed for %s: unable to establish connection", self.addr
+                )
                 return
             self._submit(self._write_command(command))
             if not already_connected:
@@ -438,7 +503,10 @@ class Bulb:
         elif cmd == 0x58:
             try:
                 self.name = values.decode("utf-8")
-            except Exception:
+            except UnicodeDecodeError as exc:
+                _LOGGER.debug(
+                    "Failed decoding bulb name notification for %s: %s", self.addr, exc
+                )
                 self.name = "Unknown"
 
 
@@ -470,7 +538,7 @@ def _is_avea_device(device) -> bool:
     for value in metadata.get("manufacturer_data", {}).values():
         try:
             decoded = bytes(value).decode("utf-8", errors="ignore")
-        except Exception:
+        except (TypeError, ValueError, UnicodeDecodeError):
             continue
         if "Avea" in decoded:
             return True
@@ -494,7 +562,7 @@ def _run_async(factory: Callable[[], Awaitable]):
             asyncio.set_event_loop(loop)
             try:
                 result["value"] = loop.run_until_complete(factory())
-            except Exception as exc:
+            except BaseException as exc:
                 error["exc"] = exc
             finally:
                 loop.close()
@@ -504,6 +572,8 @@ def _run_async(factory: Callable[[], Awaitable]):
         thread.join()
         if "exc" in error:
             raise error["exc"]
+        if "value" not in result:
+            raise RuntimeError("Failed to execute async factory in helper thread")
         return result.get("value")
 
 
@@ -554,8 +624,10 @@ def check_bounds(value):
     """Check if the given value is out-of-bounds (0 to 4095)."""
     try:
         ivalue = int(value)
-    except ValueError:
-        print("Value was not a number, returned default value of 0")
+    except (TypeError, ValueError):
+        _LOGGER.warning(
+            "Value %r was not numeric in check_bounds; using default value 0", value
+        )
         return 0
 
     if ivalue > 4095:
