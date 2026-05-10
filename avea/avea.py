@@ -153,8 +153,12 @@ class Bulb:
                 CONTROL_CHARACTERISTIC_UUID,
                 self._notification_handler,
             )
-        except Exception as exc:
-            _LOGGER.warning("Could not connect to the Bulb %s: %s", self.addr, exc)
+        except (BleakError, asyncio.TimeoutError, OSError):
+            _LOGGER.warning(
+                "Could not connect to the Bulb %s",
+                self.addr,
+                exc_info=True,
+            )
             with suppress(Exception):
                 if client:
                     await client.disconnect()
@@ -230,14 +234,23 @@ class Bulb:
             return ""
         try:
             payload = await self._client.read_gatt_char(FIRMWARE_REVISION_UUID)
-        except (BleakError, AttributeError) as exc:
-            print(exc, "get_fw_version")
+        except (BleakError, AttributeError, OSError):
+            _LOGGER.warning(
+                "Could not read firmware version from bulb %s",
+                self.addr,
+                exc_info=True,
+            )
             return ""
         if isinstance(payload, bytearray):
             payload = bytes(payload)
         try:
             return payload.decode("utf-8")
-        except Exception:
+        except UnicodeDecodeError:
+            _LOGGER.warning(
+                "Could not decode firmware version from bulb %s",
+                self.addr,
+                exc_info=True,
+            )
             return ""
 
     async def _smooth_transition(
@@ -259,7 +272,12 @@ class Bulb:
             )
             try:
                 await self._write_command(payload, with_response=False)
-            except Exception:
+            except (BleakError, asyncio.TimeoutError, OSError):
+                _LOGGER.warning(
+                    "Lost connection during smooth transition for bulb %s; reconnecting",
+                    self.addr,
+                    exc_info=True,
+                )
                 await self._disconnect()
                 if not await self._connect():
                     break
@@ -341,8 +359,12 @@ class Bulb:
         else:
             try:
                 init_w, init_r, init_g, init_b = self.get_color()
-            except Exception:
-                print("Could not connect to bulb")
+            except (BleakError, asyncio.TimeoutError, OSError):
+                _LOGGER.warning(
+                    "Could not read current color before smooth transition for bulb %s",
+                    self.addr,
+                    exc_info=True,
+                )
                 return
 
         with self._op_lock:
@@ -437,7 +459,12 @@ class Bulb:
         elif cmd == 0x58:
             try:
                 self.name = values.decode("utf-8")
-            except Exception:
+            except UnicodeDecodeError:
+                _LOGGER.warning(
+                    "Could not decode bulb name notification for bulb %s",
+                    self.addr,
+                    exc_info=True,
+                )
                 self.name = "Unknown"
 
 
@@ -469,7 +496,7 @@ def _is_avea_device(device) -> bool:
     for value in metadata.get("manufacturer_data", {}).values():
         try:
             decoded = bytes(value).decode("utf-8", errors="ignore")
-        except Exception:
+        except (TypeError, ValueError):
             continue
         if "Avea" in decoded:
             return True
@@ -553,8 +580,8 @@ def check_bounds(value):
     """Check if the given value is out-of-bounds (0 to 4095)."""
     try:
         ivalue = int(value)
-    except ValueError:
-        print("Value was not a number, returned default value of 0")
+    except (TypeError, ValueError):
+        _LOGGER.warning("Value %r was not a number; using default value 0", value)
         return 0
 
     if ivalue > 4095:
