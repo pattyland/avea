@@ -1,12 +1,26 @@
+from pathlib import Path
+import re
+
 import setuptools
 
+ROOT = Path(__file__).parent
 
-with open("README.md", "r") as fh:
+with open(ROOT / "README.md", "r", encoding="utf-8") as fh:
     long_description = fh.read()
+
+init_text = (ROOT / "avea" / "__init__.py").read_text(encoding="utf-8")
+version_match = re.search(
+    r'^__version__\s*=\s*[\'"]([^\'"]+)[\'"]\s*$',
+    init_text,
+    re.MULTILINE,
+)
+if version_match is None:
+    raise RuntimeError("Unable to find __version__ in avea/__init__.py")
+version = version_match.group(1)
 
 setuptools.setup(
     name="avea",
-    version="1.6.1",
+    version=version,
     author="k0rventen",
     description="Control an Elgato Avea bulb using python3",
     long_description=long_description,
