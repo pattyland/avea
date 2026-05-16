@@ -48,6 +48,19 @@ class LoggingTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertIn("Could not decode firmware version", "\n".join(logs.output))
 
+    async def test_read_firmware_version_strips_trailing_nul(self):
+        bulb = Bulb("00:11:22:33:44:55")
+        bulb._client = FirmwareClient(payload=bytearray(b"1.1.2.328Bf\x00"))
+
+        self.assertEqual(await bulb._read_firmware_version(), "1.1.2.328Bf")
+
+    def test_process_name_notification_strips_trailing_nul(self):
+        bulb = Bulb("00:11:22:33:44:55")
+
+        bulb.process_notification(b"\x58Fado\x00")
+
+        self.assertEqual(bulb.name, "Fado")
+
     def test_smooth_transition_masks_expected_connection_error(self):
         bulb = Bulb("00:11:22:33:44:55")
         bulb.get_color = Mock(side_effect=BleakError("not connected"))
