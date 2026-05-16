@@ -3,7 +3,7 @@ from unittest.mock import Mock
 
 from bleak.exc import BleakError
 
-from avea.avea import Bulb, MANUFACTURER_NAME_UUID, check_bounds
+from avea.avea import Bulb, HARDWARE_REVISION_UUID, MANUFACTURER_NAME_UUID, check_bounds
 
 
 class FirmwareClient:
@@ -49,6 +49,31 @@ class LoggingTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(await bulb._read_firmware_version(), "")
 
         self.assertIn("Could not decode firmware version", "\n".join(logs.output))
+
+    async def test_read_hardware_revision_reads_expected_uuid(self):
+        bulb = Bulb("00:11:22:33:44:55")
+        bulb._client = FirmwareClient(payload=bytearray(b"Elgato Avea\x00"))
+
+        self.assertEqual(await bulb._read_hardware_revision(), "Elgato Avea")
+        self.assertEqual(bulb._client.uuid, HARDWARE_REVISION_UUID)
+
+    async def test_read_hardware_revision_logs_bleak_error(self):
+        bulb = Bulb("00:11:22:33:44:55")
+        bulb._client = FirmwareClient(error=BleakError("read failed"))
+
+        with self.assertLogs("avea.avea", level="WARNING") as logs:
+            self.assertEqual(await bulb._read_hardware_revision(), "")
+
+        self.assertIn("Could not read hardware revision", "\n".join(logs.output))
+
+    async def test_read_hardware_revision_logs_decode_error(self):
+        bulb = Bulb("00:11:22:33:44:55")
+        bulb._client = FirmwareClient(payload=bytearray(b"\xff"))
+
+        with self.assertLogs("avea.avea", level="WARNING") as logs:
+            self.assertEqual(await bulb._read_hardware_revision(), "")
+
+        self.assertIn("Could not decode hardware revision", "\n".join(logs.output))
 
     async def test_read_manufacturer_name_reads_expected_uuid(self):
         bulb = Bulb("00:11:22:33:44:55")
