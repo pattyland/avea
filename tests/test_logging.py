@@ -50,6 +50,19 @@ class LoggingTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertIn("Could not decode firmware version", "\n".join(logs.output))
 
+    async def test_read_firmware_version_strips_trailing_nul(self):
+        bulb = Bulb("00:11:22:33:44:55")
+        bulb._client = FirmwareClient(payload=bytearray(b"firmware-version\x00"))
+
+        self.assertEqual(await bulb._read_firmware_version(), "firmware-version")
+
+    def test_process_name_notification_strips_trailing_nul(self):
+        bulb = Bulb("00:11:22:33:44:55")
+
+        bulb.process_notification(b"\x58test-bulb\x00")
+
+        self.assertEqual(bulb.name, "test-bulb")
+
     async def test_read_hardware_revision_reads_expected_uuid(self):
         bulb = Bulb("00:11:22:33:44:55")
         bulb._client = FirmwareClient(payload=bytearray(b"Elgato Avea\x00"))
