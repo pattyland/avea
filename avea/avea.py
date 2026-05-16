@@ -270,7 +270,7 @@ class Bulb:
         if isinstance(payload, bytearray):
             payload = bytes(payload)
         try:
-            return payload.decode("utf-8")
+            return payload.decode("utf-8").rstrip("\x00")
         except UnicodeDecodeError:
             _LOGGER.warning(
                 "Could not decode manufacturer name from bulb %s",

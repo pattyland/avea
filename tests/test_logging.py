@@ -52,7 +52,7 @@ class LoggingTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_read_manufacturer_name_reads_expected_uuid(self):
         bulb = Bulb("00:11:22:33:44:55")
-        bulb._client = FirmwareClient(payload=bytearray(b"Elgato Systems GmbH"))
+        bulb._client = FirmwareClient(payload=bytearray(b"Elgato Systems GmbH\x00"))
 
         self.assertEqual(await bulb._read_manufacturer_name(), "Elgato Systems GmbH")
         self.assertEqual(bulb._client.uuid, MANUFACTURER_NAME_UUID)
