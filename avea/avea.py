@@ -26,6 +26,7 @@ __all__ = [
 ]
 
 FIRMWARE_REVISION_UUID = "00002a26-0000-1000-8000-00805f9b34fb"
+MANUFACTURER_NAME_UUID = "00002a29-0000-1000-8000-00805f9b34fb"
 AVEA_SERVICE_UUID = "f815e810-456c-6761-746f-4d756e696368"
 CONTROL_CHARACTERISTIC_UUID = "f815e811-456c-6761-746f-4d756e696368"
 MAX_TRANSITION_FPS = 5
@@ -41,6 +42,7 @@ class Bulb:
         self.addr = address
         self.name = "Unknown"
         self.fw_version = "Unknown"
+        self.manufacturer_name = "Unknown"
         self.red = 0
         self.blue = 0
         self.green = 0
@@ -253,6 +255,30 @@ class Bulb:
             )
             return ""
 
+    async def _read_manufacturer_name(self) -> str:
+        if not self._client:
+            return ""
+        try:
+            payload = await self._client.read_gatt_char(MANUFACTURER_NAME_UUID)
+        except (BleakError, AttributeError, OSError):
+            _LOGGER.warning(
+                "Could not read manufacturer name from bulb %s",
+                self.addr,
+                exc_info=True,
+            )
+            return ""
+        if isinstance(payload, bytearray):
+            payload = bytes(payload)
+        try:
+            return payload.decode("utf-8").rstrip("\x00")
+        except UnicodeDecodeError:
+            _LOGGER.warning(
+                "Could not decode manufacturer name from bulb %s",
+                self.addr,
+                exc_info=True,
+            )
+            return ""
+
     async def _smooth_transition(
         self,
         red_table: Sequence[int],
@@ -302,6 +328,19 @@ class Bulb:
                 self.disconnect()
         result = value if isinstance(value, str) else ""
         self.fw_version = result
+        return result
+
+    def get_manufacturer_name(self) -> str:
+        with self._op_lock:
+            already_connected = self._is_connected()
+            if not already_connected and not self.connect():
+                self.manufacturer_name = ""
+                return ""
+            value = self._submit(self._read_manufacturer_name())
+            if not already_connected:
+                self.disconnect()
+        result = value if isinstance(value, str) else ""
+        self.manufacturer_name = result
         return result
 
     def set_brightness(self, brightness):
