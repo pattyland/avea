@@ -7,6 +7,7 @@ Source  : https://github.com/k0rventen/avea
 import asyncio
 import logging
 import math
+import re
 import threading
 from contextlib import suppress
 from typing import Awaitable, Callable, Optional, Sequence
@@ -34,6 +35,15 @@ MAX_TRANSITION_FPS = 5
 
 
 _LOGGER = logging.getLogger(__name__)
+_FW_VERSION_RE = re.compile(r"^(\d+)\.(\d+)\.(\d+)\.(\d+)")
+
+
+def _format_firmware_version(value: str) -> str:
+    match = _FW_VERSION_RE.match(value)
+    if not match:
+        return value
+    major, minor, patch, build = match.groups()
+    return f"{major}.{minor}.{patch} ({build})"
 
 
 class Bulb:
@@ -352,7 +362,7 @@ class Bulb:
             value = self._submit(self._read_firmware_version())
             if not already_connected:
                 self.disconnect()
-        result = value if isinstance(value, str) else ""
+        result = _format_firmware_version(value) if isinstance(value, str) else ""
         self.fw_version = result
         return result
 
