@@ -3,7 +3,13 @@ from unittest.mock import Mock
 
 from bleak.exc import BleakError
 
-from avea.avea import Bulb, HARDWARE_REVISION_UUID, MANUFACTURER_NAME_UUID, check_bounds
+from avea.avea import (
+    Bulb,
+    FIRMWARE_REVISION_UUID,
+    HARDWARE_REVISION_UUID,
+    MANUFACTURER_NAME_UUID,
+    check_bounds,
+)
 
 
 class FirmwareClient:
@@ -11,12 +17,19 @@ class FirmwareClient:
         self.payload = payload
         self.error = error
         self.uuid = None
+        self.is_connected = True
 
     async def read_gatt_char(self, uuid):
         self.uuid = uuid
         if self.error:
             raise self.error
         return self.payload
+
+    async def stop_notify(self, uuid):
+        return None
+
+    async def disconnect(self):
+        self.is_connected = False
 
 
 class LoggingTests(unittest.IsolatedAsyncioTestCase):
@@ -55,6 +68,30 @@ class LoggingTests(unittest.IsolatedAsyncioTestCase):
         bulb._client = FirmwareClient(payload=bytearray(b"firmware-version\x00"))
 
         self.assertEqual(await bulb._read_firmware_version(), "firmware-version")
+
+    def test_get_fw_version_formats_app_version(self):
+        bulb = Bulb("00:11:22:33:44:55")
+        bulb._client = FirmwareClient(payload=bytearray(b"1.1.2.328Bf"))
+
+        self.assertEqual(bulb.get_fw_version(), "1.1.2 (328)")
+        self.assertEqual(bulb.fw_version, "1.1.2 (328)")
+        self.assertEqual(bulb._client.uuid, FIRMWARE_REVISION_UUID)
+        bulb.close()
+
+    def test_get_fw_version_formats_numeric_build(self):
+        bulb = Bulb("00:11:22:33:44:55")
+        bulb._client = FirmwareClient(payload=bytearray(b"1.1.2.328"))
+
+        self.assertEqual(bulb.get_fw_version(), "1.1.2 (328)")
+        bulb.close()
+
+    def test_get_fw_version_keeps_unknown_format(self):
+        bulb = Bulb("00:11:22:33:44:55")
+        bulb._client = FirmwareClient(payload=bytearray(b"firmware-version"))
+
+        self.assertEqual(bulb.get_fw_version(), "firmware-version")
+        self.assertEqual(bulb.fw_version, "firmware-version")
+        bulb.close()
 
     def test_process_name_notification_strips_trailing_nul(self):
         bulb = Bulb("00:11:22:33:44:55")
