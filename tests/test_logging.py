@@ -8,6 +8,7 @@ from avea.avea import (
     FIRMWARE_REVISION_UUID,
     HARDWARE_REVISION_UUID,
     MANUFACTURER_NAME_UUID,
+    SERIAL_NUMBER_UUID,
     check_bounds,
 )
 
@@ -99,6 +100,60 @@ class LoggingTests(unittest.IsolatedAsyncioTestCase):
         bulb.process_notification(b"\x58test-bulb\x00")
 
         self.assertEqual(bulb.name, "test-bulb")
+
+    async def test_read_serial_number_reads_expected_uuid(self):
+        bulb = Bulb("00:11:22:33:44:55")
+        bulb._client = FirmwareClient(payload=bytearray(b"ABC123\x00"))
+
+        self.assertEqual(await bulb._read_serial_number(), "ABC123")
+        self.assertEqual(bulb._client.uuid, SERIAL_NUMBER_UUID)
+
+    async def test_read_serial_number_strips_extra_nuls(self):
+        bulb = Bulb("00:11:22:33:44:55")
+        bulb._client = FirmwareClient(payload=bytearray(b"ABC123\x00\x00"))
+
+        self.assertEqual(await bulb._read_serial_number(), "ABC123")
+
+    async def test_read_serial_number_strips_at_first_nul(self):
+        bulb = Bulb("00:11:22:33:44:55")
+        bulb._client = FirmwareClient(payload=bytearray(b"ABC123\x00junk"))
+
+        self.assertEqual(await bulb._read_serial_number(), "ABC123")
+
+    async def test_read_serial_number_logs_bleak_error(self):
+        bulb = Bulb("00:11:22:33:44:55")
+        bulb._client = FirmwareClient(error=BleakError("read failed"))
+
+        with self.assertLogs("avea.avea", level="WARNING") as logs:
+            self.assertEqual(await bulb._read_serial_number(), "")
+
+        self.assertIn("Could not read serial number", "\n".join(logs.output))
+
+    async def test_read_serial_number_logs_decode_error(self):
+        bulb = Bulb("00:11:22:33:44:55")
+        bulb._client = FirmwareClient(payload=bytearray(b"\xff"))
+
+        with self.assertLogs("avea.avea", level="WARNING") as logs:
+            self.assertEqual(await bulb._read_serial_number(), "")
+
+        self.assertIn("Could not decode serial number", "\n".join(logs.output))
+
+    def test_get_serial_number_caches_result(self):
+        bulb = Bulb("00:11:22:33:44:55")
+        bulb._client = FirmwareClient(payload=bytearray(b"ABC123"))
+
+        self.assertEqual(bulb.get_serial_number(), "ABC123")
+        self.assertEqual(bulb.serial_number, "ABC123")
+        self.assertEqual(bulb._client.uuid, SERIAL_NUMBER_UUID)
+        bulb.close()
+
+    def test_get_serial_number_returns_empty_when_connection_fails(self):
+        bulb = Bulb("00:11:22:33:44:55")
+        bulb.serial_number = "Unknown"
+        bulb.connect = Mock(return_value=False)
+
+        self.assertEqual(bulb.get_serial_number(), "")
+        self.assertEqual(bulb.serial_number, "")
 
     async def test_read_hardware_revision_reads_expected_uuid(self):
         bulb = Bulb("00:11:22:33:44:55")

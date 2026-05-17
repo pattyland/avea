@@ -27,6 +27,7 @@ __all__ = [
 ]
 
 FIRMWARE_REVISION_UUID = "00002a26-0000-1000-8000-00805f9b34fb"
+SERIAL_NUMBER_UUID = "00002a25-0000-1000-8000-00805f9b34fb"
 HARDWARE_REVISION_UUID = "00002a27-0000-1000-8000-00805f9b34fb"
 MANUFACTURER_NAME_UUID = "00002a29-0000-1000-8000-00805f9b34fb"
 AVEA_SERVICE_UUID = "f815e810-456c-6761-746f-4d756e696368"
@@ -53,6 +54,7 @@ class Bulb:
         self.addr = address
         self.name = "Unknown"
         self.fw_version = "Unknown"
+        self.serial_number = "Unknown"
         self.hardware_revision = "Unknown"
         self.manufacturer_name = "Unknown"
         self.red = 0
@@ -267,6 +269,30 @@ class Bulb:
             )
             return ""
 
+    async def _read_serial_number(self) -> str:
+        if not self._client:
+            return ""
+        try:
+            payload = await self._client.read_gatt_char(SERIAL_NUMBER_UUID)
+        except (BleakError, AttributeError, OSError):
+            _LOGGER.warning(
+                "Could not read serial number from bulb %s",
+                self.addr,
+                exc_info=True,
+            )
+            return ""
+        if isinstance(payload, bytearray):
+            payload = bytes(payload)
+        try:
+            return payload.decode("utf-8").split("\x00", 1)[0]
+        except UnicodeDecodeError:
+            _LOGGER.warning(
+                "Could not decode serial number from bulb %s",
+                self.addr,
+                exc_info=True,
+            )
+            return ""
+
     async def _read_hardware_revision(self) -> str:
         if not self._client:
             return ""
@@ -364,6 +390,21 @@ class Bulb:
                 self.disconnect()
         result = _format_firmware_version(value) if isinstance(value, str) else ""
         self.fw_version = result
+        return result
+
+    def get_serial_number(self) -> str:
+        with self._op_lock:
+            already_connected = self._is_connected()
+            if not already_connected and not self.connect():
+                self.serial_number = ""
+                return ""
+            try:
+                value = self._submit(self._read_serial_number())
+            finally:
+                if not already_connected:
+                    self.disconnect()
+        result = value if isinstance(value, str) else ""
+        self.serial_number = result
         return result
 
     def get_hardware_revision(self) -> str:
